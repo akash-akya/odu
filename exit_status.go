@@ -20,5 +20,5 @@ func getExitStatus(err error) int {
 }
 
 func makeSignal(sig byte) os.Signal {
-	return syscall.Signal(int(sig));
+	return syscall.Signal(int(sig))
 }

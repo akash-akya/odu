@@ -1,20 +1,16 @@
-Goon
+Odu
 ====
 
-Goon is a companion program for the [Porcelain][1] library written in Elixir.
+Odu is a middleware program which helps with talking to external programs from Elixir or Erlang.
 
-## Usage with Porcelain
+Port implementation in beam does not put any back-pressure on the external program which can lead to flooding of owner process mailbox with port command output. Odu tries to fix this by acting as a middleware and by making the output consumption as a demand driven. It also try to fill other gaps such as exiting external program properly.
 
-Go to [Releases][2] and pick the `goon` binary for your system. Put it
-somewhere in your `PATH` (or into the directory that will become the current
+Odu is heavily based on [goon](https://github.com/alco/goon) by [Alexei Sholik](https://github.com/alco). Changes are made on top of goon, odu changes are incompatible with goon.
+
+## Usage
+
+Put odu somewhere in your `PATH` (or into the directory that will become the current
 working directory of your application).
-
-Always download the latest release. Goon will forever be backwards compatible
-with _all_ past releases of Porcelain. The old releases are kept online merely
-for history.
-
-  [1]: https://github.com/alco/porcelain
-  [2]: https://github.com/alco/goon/releases
 
 ## Building from source
 

@@ -30,6 +30,5 @@ func initLogger(flag string) {
 		file, err = os.OpenFile(flag, os.O_CREATE|os.O_WRONLY, 0666)
 		fatal_if(err)
 	}
-	logger = log.New(file, "[goon]: ", log.Lmicroseconds)
+	logger = log.New(file, "[odu]: ", log.Lmicroseconds)
 }
-

@@ -38,8 +38,3 @@ func fatal_if(any interface{}) {
 		logger.Panicf("%v\n", any)
 	}
 }
-
-/*func shplit(str string) []string {*/
-	/*// FIXME*/
-	/*return []string{str}*/
-/*}*/
