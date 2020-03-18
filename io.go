@@ -8,7 +8,7 @@ import (
 
 var outBuf [1 << 16]byte
 
-func startOutputStreamer(done <-chan struct{}, pipe io.ReadCloser, outstream io.Writer, maxChunkSize int, demand <-chan int) <-chan struct{} {
+func startOutputStreamer(pipe io.ReadCloser, outstream io.Writer, maxChunkSize int, demand <-chan int) <-chan struct{} {
 	exit := make(chan struct{})
 	const stdoutMarker = 0x00
 
@@ -76,16 +76,20 @@ func startOutputStreamer(done <-chan struct{}, pipe io.ReadCloser, outstream io.
 				}
 			}
 		}
+		logger.Println("Exiting output streamer")
 	}()
 	return exit
 }
 
-func startCommandConsumer(done <-chan struct{}, stdin io.Reader) <-chan int {
+func startCommandConsumer(stdin io.Reader) (<-chan int, <-chan struct{}) {
 	demand := make(chan int)
+	exitSignal := make(chan struct{})
 	buf := make([]byte, 4)
 
 	go func() {
+		defer close(exitSignal)
 		defer close(demand)
+
 		for {
 			bytesRead, readErr := io.ReadFull(stdin, buf[:2])
 			logger.Printf("READ stdin %v bytes", bytesRead)
@@ -111,26 +115,25 @@ func startCommandConsumer(done <-chan struct{}, stdin io.Reader) <-chan int {
 
 			demand <- int(read32Be(buf[:4]))
 		}
+		logger.Println("Exiting command consumer")
 	}()
 
-	return aggregate(done, demand)
+	return aggregate(demand), exitSignal
 }
 
-func aggregate(done <-chan struct{}, demand <-chan int) <-chan int {
+func aggregate(demand <-chan int) <-chan int {
 	out := make(chan int, 1)
 	go func() {
 		defer close(out)
 		for d := range demand {
 			select {
 			case existing := <-out:
-				logger.Printf("[agg] overwrite to: %d", existing+d)
 				out <- (existing + d)
 			default:
-				logger.Printf("[agg] new: %d", d)
 				out <- d
 			}
 		}
-		logger.Println("aggregate EXIT")
+		logger.Println("Exiting aggregator")
 	}()
 	return out
 }
