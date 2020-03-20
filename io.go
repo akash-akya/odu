@@ -76,9 +76,38 @@ func startOutputStreamer(pipe io.ReadCloser, outstream io.Writer, maxChunkSize i
 				}
 			}
 		}
-		logger.Println("Exiting output streamer")
 	}()
 	return exit
+}
+
+func startInputConsumer(pipe io.WriteCloser, fifo *os.File) {
+	buf := make([]byte, 2)
+
+	go func() {
+		for {
+			bytes_read, read_err := io.ReadFull(fifo, buf)
+			if read_err == io.EOF && bytes_read == 0 {
+				break
+			}
+			fatal_if(read_err)
+
+			length := read16Be(buf)
+			logger.Printf("cmd in: packet length = %v\n", length)
+			if length == 0 {
+				return
+			}
+
+			_, write_err := io.CopyN(pipe, fifo, int64(length))
+			if write_err != nil {
+				// If command exists early then pipe will be closed
+				// FIXME: do proper error handling
+				if write_err.Error() == "write |1: file already closed" {
+					return
+				}
+				fatal_if(write_err)
+			}
+		}
+	}()
 }
 
 func startCommandConsumer(stdin io.Reader) (<-chan int, <-chan struct{}) {
@@ -115,7 +144,6 @@ func startCommandConsumer(stdin io.Reader) (<-chan int, <-chan struct{}) {
 
 			demand <- int(read32Be(buf[:4]))
 		}
-		logger.Println("Exiting command consumer")
 	}()
 
 	return aggregate(demand), exitSignal

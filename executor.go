@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func executor(workdir string, maxChunkSize int, args []string) error {
+func executor(workdir string, inputFifoPath string, maxChunkSize int, args []string) error {
 	const stdoutMarker = 0x00
 	// const stderrMarker = 0x01
 
@@ -16,8 +16,10 @@ func executor(workdir string, maxChunkSize int, args []string) error {
 
 	logger.Printf("Command path: %v\n", proc.Path)
 
+	inputFifo := openFifo(inputFifoPath)
+
 	signal := make(chan bool)
-	go startPipeline(proc, os.Stdin, os.Stdout, maxChunkSize, signal)
+	go startPipeline(proc, os.Stdin, os.Stdout, inputFifo, maxChunkSize, signal)
 
 	// wait pipeline to start
 	<-signal
@@ -40,7 +42,7 @@ func executor(workdir string, maxChunkSize int, args []string) error {
 	return err
 }
 
-func startPipeline(proc *exec.Cmd, stdin io.Reader, outstream io.Writer, maxChunkSize int, signal chan bool) {
+func startPipeline(proc *exec.Cmd, stdin io.Reader, outstream io.Writer, inputFifo *os.File, maxChunkSize int, signal chan bool) {
 	// some commands expect stdin to be connected
 	cmdInput, err := proc.StdinPipe()
 	fatal_if(err)
@@ -50,7 +52,8 @@ func startPipeline(proc *exec.Cmd, stdin io.Reader, outstream io.Writer, maxChun
 
 	logger.Println("Starting pipeline")
 
-	demand, consumerExit := startCommandConsumer(stdin)
+	demand, demandConsumerExit := startCommandConsumer(stdin)
+	startInputConsumer(cmdInput, inputFifo)
 	outputStreamerExit := startOutputStreamer(cmdOutput, outstream, maxChunkSize, demand)
 
 	// signal that pipline is setup
@@ -58,7 +61,7 @@ func startPipeline(proc *exec.Cmd, stdin io.Reader, outstream io.Writer, maxChun
 
 	// wait for pipline to exit
 	select {
-	case <-consumerExit:
+	case <-demandConsumerExit:
 	case <-outputStreamerExit:
 	}
 
@@ -84,4 +87,12 @@ func safeExit(proc *exec.Cmd) error {
 	case err := <-done:
 		return err
 	}
+}
+
+func openFifo(fifoPath string) *os.File {
+	fifo, err := os.OpenFile(fifoPath, os.O_RDONLY, 0600)
+	if err != nil {
+		fatal(err)
+	}
+	return fifo
 }
