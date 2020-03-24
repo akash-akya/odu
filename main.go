@@ -13,7 +13,7 @@ const usage = "Usage: odu [options] -- <program> [<arg>...]"
 var dirFlag = flag.String("dir", ".", "working directory for the spawned process")
 var logFlag = flag.String("log", "", "enable logging")
 var inputFlag = flag.String("input", "", "path to input fifo")
-var chunkSizeFlag = flag.Int("chunk-size", 65035, "maximum chunk size (depends on operating system)")
+var outputFlag = flag.String("output", "", "path to output fifo")
 var versionFlag = flag.Bool("v", false, "print version and exit")
 
 func main() {
@@ -24,8 +24,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *chunkSizeFlag <= 0 {
-		die_usage("chunk-size should be a valid positive integer.")
+	if pipeExists(*outputFlag) {
+		die_usage("output is not a pipe")
 	}
 
 	if pipeExists(*inputFlag) {
@@ -37,7 +37,7 @@ func main() {
 	args := flag.Args()
 	validateArgs(args)
 
-	err := executor(*dirFlag, *inputFlag, *chunkSizeFlag, args)
+	err := executor(*dirFlag, *inputFlag, *outputFlag, args)
 	if err != nil {
 		os.Exit(getExitStatus(err))
 	}

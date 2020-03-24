@@ -1,13 +1,12 @@
 package main
 
 import (
-	"io"
 	"os"
 	"os/exec"
 	"time"
 )
 
-func executor(workdir string, inputFifoPath string, maxChunkSize int, args []string) error {
+func executor(workdir string, inputFifoPath string, outputFifoPath string, args []string) error {
 	const stdoutMarker = 0x00
 	// const stderrMarker = 0x01
 
@@ -16,10 +15,11 @@ func executor(workdir string, inputFifoPath string, maxChunkSize int, args []str
 
 	logger.Printf("Command path: %v\n", proc.Path)
 
-	inputFifo := openFifo(inputFifoPath)
+	inputFifo := openFifo(inputFifoPath, os.O_RDONLY)
+	outputFifo := openFifo(outputFifoPath, os.O_WRONLY)
 
 	signal := make(chan bool)
-	go startPipeline(proc, os.Stdin, os.Stdout, inputFifo, maxChunkSize, signal)
+	go startPipeline(proc, inputFifo, outputFifo, signal)
 
 	// wait pipeline to start
 	<-signal
@@ -42,7 +42,7 @@ func executor(workdir string, inputFifoPath string, maxChunkSize int, args []str
 	return err
 }
 
-func startPipeline(proc *exec.Cmd, stdin io.Reader, outstream io.Writer, inputFifo *os.File, maxChunkSize int, signal chan bool) {
+func startPipeline(proc *exec.Cmd, inputFifo *os.File, outputFifo *os.File, signal chan bool) {
 	// some commands expect stdin to be connected
 	cmdInput, err := proc.StdinPipe()
 	fatal_if(err)
@@ -52,18 +52,14 @@ func startPipeline(proc *exec.Cmd, stdin io.Reader, outstream io.Writer, inputFi
 
 	logger.Println("Starting pipeline")
 
-	demand, demandConsumerExit := startCommandConsumer(stdin)
 	startInputConsumer(cmdInput, inputFifo)
-	outputStreamerExit := startOutputStreamer(cmdOutput, outstream, maxChunkSize, demand)
+	outputStreamerExit := startOutputStreamer(cmdOutput, outputFifo)
 
 	// signal that pipline is setup
 	signal <- true
 
 	// wait for pipline to exit
-	select {
-	case <-demandConsumerExit:
-	case <-outputStreamerExit:
-	}
+	<-outputStreamerExit
 
 	cmdOutput.Close()
 	cmdInput.Close()
@@ -89,8 +85,8 @@ func safeExit(proc *exec.Cmd) error {
 	}
 }
 
-func openFifo(fifoPath string) *os.File {
-	fifo, err := os.OpenFile(fifoPath, os.O_RDONLY, 0600)
+func openFifo(fifoPath string, mode int) *os.File {
+	fifo, err := os.OpenFile(fifoPath, mode, 0600)
 	if err != nil {
 		fatal(err)
 	}
