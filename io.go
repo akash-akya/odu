@@ -18,7 +18,7 @@ func startOutputStreamer(pipe io.ReadCloser, fifo *os.File) <-chan struct{} {
 		}()
 
 		for {
-			bytesRead, ReadErr := pipe.Read(buf[2:])
+			bytesRead, readErr := pipe.Read(buf[2:])
 			if bytesRead > 0 {
 				write16Be(buf[:2], bytesRead)
 				bytesWritten, writeErr := fifo.Write(buf[:bytesRead+2])
@@ -33,10 +33,10 @@ func startOutputStreamer(pipe io.ReadCloser, fifo *os.File) <-chan struct{} {
 				}
 				logger.Printf("[cmd_out] written bytes: %v\n", bytesWritten)
 
-			} else if ReadErr == io.EOF && bytesRead == 0 {
+			} else if readErr == io.EOF && bytesRead == 0 {
 				return
 			} else {
-				fatal(ReadErr)
+				fatal(readErr)
 			}
 		}
 	}()
@@ -57,7 +57,7 @@ func startInputConsumer(pipe io.WriteCloser, fifo *os.File) {
 			if readErr == io.EOF && bytesRead == 0 {
 				return
 			}
-			fatal_if(readErr)
+			fatalIf(readErr)
 
 			length := read16Be(buf)
 			logger.Printf("[cmd_in] read packet length = %v\n", length)

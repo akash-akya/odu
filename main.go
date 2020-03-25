@@ -6,6 +6,7 @@ import (
 	"os"
 )
 
+// VERSION of the odu
 const VERSION = "0.1.0"
 
 const usage = "Usage: odu [options] -- <program> [<arg>...]"
@@ -25,11 +26,11 @@ func main() {
 	}
 
 	if pipeExists(*outputFlag) {
-		die_usage("output is not a pipe")
+		dieUsage("output is not a pipe")
 	}
 
 	if pipeExists(*inputFlag) {
-		die_usage("input is not a pipe")
+		dieUsage("input is not a pipe")
 	}
 
 	initLogger(*logFlag)
@@ -45,7 +46,7 @@ func main() {
 
 func validateArgs(args []string) {
 	if len(args) < 1 {
-		die_usage("Not enough arguments.")
+		dieUsage("Not enough arguments.")
 	}
 
 	logger.Printf("Flag values:\n  dir: %v\nArgs: %v\n", *dirFlag, args)

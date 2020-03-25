@@ -13,7 +13,7 @@ func die(reason string) {
 	os.Exit(-1)
 }
 
-func die_usage(reason string) {
+func dieUsage(reason string) {
 	if logger != nil {
 		logger.Printf("dying: %v\n", reason)
 	}
@@ -29,7 +29,7 @@ func fatal(any interface{}) {
 	logger.Panicf("%v\n", any)
 }
 
-func fatal_if(any interface{}) {
+func fatalIf(any interface{}) {
 	if logger == nil {
 		fmt.Fprintf(os.Stderr, "%v\n", any)
 		os.Exit(-1)
