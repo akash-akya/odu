@@ -61,9 +61,6 @@ func startPipeline(proc *exec.Cmd, inputFifo *os.File, outputFifo *os.File, sign
 	// wait for pipline to exit
 	<-outputStreamerExit
 
-	cmdOutput.Close()
-	cmdInput.Close()
-
 	// signal pipeline shutdown
 	signal <- true
 }

@@ -11,7 +11,12 @@ var buf [1 << 16]byte
 func startOutputStreamer(pipe io.ReadCloser, fifo *os.File) <-chan struct{} {
 	exit := make(chan struct{})
 	go func() {
-		defer close(exit)
+		defer func() {
+			pipe.Close()
+			fifo.Close()
+			close(exit)
+		}()
+
 		for {
 			bytesRead, ReadErr := pipe.Read(buf[2:])
 			if bytesRead > 0 {
@@ -42,6 +47,11 @@ func startInputConsumer(pipe io.WriteCloser, fifo *os.File) {
 	buf := make([]byte, 2)
 
 	go func() {
+		defer func() {
+			fifo.Close()
+			pipe.Close()
+		}()
+
 		for {
 			bytesRead, readErr := io.ReadFull(fifo, buf)
 			if readErr == io.EOF && bytesRead == 0 {
