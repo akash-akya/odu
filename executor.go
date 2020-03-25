@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"time"
@@ -54,12 +56,16 @@ func startPipeline(proc *exec.Cmd, inputFifo *os.File, outputFifo *os.File, sign
 
 	startInputConsumer(cmdInput, inputFifo)
 	outputStreamerExit := startOutputStreamer(cmdOutput, outputFifo)
+	commandExit := createCommandExitChan(os.Stdin)
 
 	// signal that pipline is setup
 	signal <- true
 
 	// wait for pipline to exit
-	<-outputStreamerExit
+	select {
+	case <-outputStreamerExit:
+	case <-commandExit:
+	}
 
 	// signal pipeline shutdown
 	signal <- true
@@ -88,4 +94,16 @@ func openFifo(fifoPath string, mode int) *os.File {
 		fatal(err)
 	}
 	return fifo
+}
+
+func createCommandExitChan(stdin io.ReadCloser) <-chan struct{} {
+	exitSignal := make(chan struct{})
+	go func() {
+		defer close(exitSignal)
+
+		_, err := io.Copy(ioutil.Discard, stdin)
+		fatalIf(err)
+	}()
+
+	return exitSignal
 }
