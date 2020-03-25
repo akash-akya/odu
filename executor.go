@@ -2,12 +2,13 @@ package main
 
 import (
 	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"time"
 )
 
-func executor(workdir string, maxChunkSize int, args []string) error {
+func executor(workdir string, inputFifoPath string, outputFifoPath string, args []string) error {
 	const stdoutMarker = 0x00
 	// const stderrMarker = 0x01
 
@@ -16,14 +17,17 @@ func executor(workdir string, maxChunkSize int, args []string) error {
 
 	logger.Printf("Command path: %v\n", proc.Path)
 
+	inputFifo := openFifo(inputFifoPath, os.O_RDONLY)
+	outputFifo := openFifo(outputFifoPath, os.O_WRONLY)
+
 	signal := make(chan bool)
-	go startPipeline(proc, os.Stdin, os.Stdout, maxChunkSize, signal)
+	go startPipeline(proc, inputFifo, outputFifo, signal)
 
 	// wait pipeline to start
 	<-signal
 
 	err := proc.Start()
-	fatal_if(err)
+	fatalIf(err)
 
 	// wait for pipeline exit
 	<-signal
@@ -40,30 +44,28 @@ func executor(workdir string, maxChunkSize int, args []string) error {
 	return err
 }
 
-func startPipeline(proc *exec.Cmd, stdin io.Reader, outstream io.Writer, maxChunkSize int, signal chan bool) {
+func startPipeline(proc *exec.Cmd, inputFifo *os.File, outputFifo *os.File, signal chan bool) {
 	// some commands expect stdin to be connected
 	cmdInput, err := proc.StdinPipe()
-	fatal_if(err)
+	fatalIf(err)
 
 	cmdOutput, err := proc.StdoutPipe()
-	fatal_if(err)
+	fatalIf(err)
 
 	logger.Println("Starting pipeline")
 
-	demand, consumerExit := startCommandConsumer(stdin)
-	outputStreamerExit := startOutputStreamer(cmdOutput, outstream, maxChunkSize, demand)
+	startInputConsumer(cmdInput, inputFifo)
+	outputStreamerExit := startOutputStreamer(cmdOutput, outputFifo)
+	commandExit := createCommandExitChan(os.Stdin)
 
 	// signal that pipline is setup
 	signal <- true
 
 	// wait for pipline to exit
 	select {
-	case <-consumerExit:
 	case <-outputStreamerExit:
+	case <-commandExit:
 	}
-
-	cmdOutput.Close()
-	cmdInput.Close()
 
 	// signal pipeline shutdown
 	signal <- true
@@ -84,4 +86,24 @@ func safeExit(proc *exec.Cmd) error {
 	case err := <-done:
 		return err
 	}
+}
+
+func openFifo(fifoPath string, mode int) *os.File {
+	fifo, err := os.OpenFile(fifoPath, mode, 0600)
+	if err != nil {
+		fatal(err)
+	}
+	return fifo
+}
+
+func createCommandExitChan(stdin io.ReadCloser) <-chan struct{} {
+	exitSignal := make(chan struct{})
+	go func() {
+		defer close(exitSignal)
+
+		_, err := io.Copy(ioutil.Discard, stdin)
+		fatalIf(err)
+	}()
+
+	return exitSignal
 }

@@ -15,8 +15,6 @@ func (w dummyWriter) Write(p []byte) (n int, err error) {
 }
 
 func initLogger(flag string) {
-	const kFileMode = 0666
-
 	var file io.Writer
 	switch flag {
 	case "":
@@ -28,7 +26,7 @@ func initLogger(flag string) {
 	default:
 		var err error
 		file, err = os.OpenFile(flag, os.O_CREATE|os.O_WRONLY, 0666)
-		fatal_if(err)
+		fatalIf(err)
 	}
 	logger = log.New(file, "[odu]: ", log.Lmicroseconds)
 }
