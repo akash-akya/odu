@@ -13,8 +13,9 @@ const usage = "Usage: odu [options] -- <program> [<arg>...]"
 
 var dirFlag = flag.String("dir", ".", "working directory for the spawned process")
 var logFlag = flag.String("log", "", "enable logging")
-var inputFlag = flag.String("input", "", "path to input fifo")
-var outputFlag = flag.String("output", "", "path to output fifo")
+var stdinFlag = flag.String("stdin", "", "path to fifo file from which input is read")
+var stdoutFlag = flag.String("stdout", "", "path to fifo file to which output written")
+var stderrFlag = flag.String("stderr", "", "path to fifo file to which stderr output is written. stderr is ignored if its not set (default)")
 var versionFlag = flag.Bool("v", false, "print version and exit")
 
 func main() {
@@ -27,18 +28,22 @@ func main() {
 		os.Exit(0)
 	}
 
-	if notFifo(*outputFlag) {
-		dieUsage("output is not a fifo file")
+	if notFifo(*stdoutFlag) {
+		dieUsage("stdin param is not a fifo file")
 	}
 
-	if notFifo(*inputFlag) {
-		dieUsage("input is not a fifo file")
+	if notFifo(*stdinFlag) {
+		dieUsage("stdout param is not a fifo file")
+	}
+
+	if *stderrFlag != "" && notFifo(*stderrFlag) {
+		dieUsage("stderr param invalid")
 	}
 
 	args := flag.Args()
 	validateArgs(args)
 
-	err := executor(*dirFlag, *inputFlag, *outputFlag, args)
+	err := executor(*dirFlag, *stdinFlag, *stdoutFlag, args)
 	if err != nil {
 		os.Exit(getExitStatus(err))
 	}
