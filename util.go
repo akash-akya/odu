@@ -50,23 +50,3 @@ func (w nullWriteCloser) Write(p []byte) (n int, err error) {
 func (w nullWriteCloser) Close() (err error) {
 	return nil
 }
-
-type stdoutWriteCloser bool
-
-func (w stdoutWriteCloser) Write(p []byte) (n int, err error) {
-	return os.Stdout.Write(p)
-}
-
-func (w stdoutWriteCloser) Close() (err error) {
-	return nil
-}
-
-type stderrWriteCloser bool
-
-func (w stderrWriteCloser) Write(p []byte) (n int, err error) {
-	return os.Stderr.Write(p)
-}
-
-func (w stderrWriteCloser) Close() (err error) {
-	return nil
-}
