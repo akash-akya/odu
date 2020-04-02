@@ -43,7 +43,7 @@ func main() {
 	args := flag.Args()
 	validateArgs(args)
 
-	err := executor(*dirFlag, *stdinFlag, *stdoutFlag, args)
+	err := executor(*dirFlag, *stdinFlag, *stdoutFlag, *stderrFlag, args)
 	if err != nil {
 		os.Exit(getExitStatus(err))
 	}

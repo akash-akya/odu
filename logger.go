@@ -8,17 +8,11 @@ import (
 
 var logger *log.Logger
 
-type dummyWriter bool
-
-func (w dummyWriter) Write(p []byte) (n int, err error) {
-	return len(p), nil
-}
-
 func initLogger(flag string) {
 	var file io.Writer
 	switch flag {
 	case "":
-		file = new(dummyWriter)
+		file = new(nullWriteCloser)
 	case "|1":
 		file = os.Stdout
 	case "|2":

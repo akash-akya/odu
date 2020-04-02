@@ -8,20 +8,18 @@ import (
 	"time"
 )
 
-func executor(workdir string, inputFifoPath string, outputFifoPath string, args []string) error {
-	const stdoutMarker = 0x00
-	// const stderrMarker = 0x01
-
+func executor(workdir string, inputFifoPath string, outputFifoPath string, errorFifoPath string, args []string) error {
 	proc := exec.Command(args[0], args[1:]...)
 	proc.Dir = workdir
 
 	logger.Printf("Command path: %v\n", proc.Path)
 
-	inputFifo := openFifo(inputFifoPath, os.O_RDONLY)
-	outputFifo := openFifo(outputFifoPath, os.O_WRONLY)
+	stdinFifo := openReadCloser(inputFifoPath)
+	stdoutFifo := openWriteCloser(outputFifoPath)
+	stderrFifo := openWriteCloser(errorFifoPath)
 
 	signal := make(chan bool)
-	go startPipeline(proc, inputFifo, outputFifo, signal)
+	go startPipeline(proc, stdinFifo, stdoutFifo, stderrFifo, signal)
 
 	// wait pipeline to start
 	<-signal
@@ -44,7 +42,7 @@ func executor(workdir string, inputFifoPath string, outputFifoPath string, args 
 	return err
 }
 
-func startPipeline(proc *exec.Cmd, inputFifo *os.File, outputFifo *os.File, signal chan bool) {
+func startPipeline(proc *exec.Cmd, stdinFifo io.ReadCloser, stdoutFifo io.WriteCloser, stderrFifo io.WriteCloser, signal chan bool) {
 	// some commands expect stdin to be connected
 	cmdInput, err := proc.StdinPipe()
 	fatalIf(err)
@@ -52,10 +50,14 @@ func startPipeline(proc *exec.Cmd, inputFifo *os.File, outputFifo *os.File, sign
 	cmdOutput, err := proc.StdoutPipe()
 	fatalIf(err)
 
+	cmdError, err := proc.StderrPipe()
+	fatalIf(err)
+
 	logger.Println("Starting pipeline")
 
-	startInputConsumer(cmdInput, inputFifo)
-	outputStreamerExit := startOutputStreamer(cmdOutput, outputFifo)
+	startInputConsumer(cmdInput, stdinFifo)
+	outputStreamerExit := startOutputStreamer(cmdOutput, stdoutFifo)
+	startErrorStreamer(cmdError, stderrFifo)
 	commandExit := createCommandExitChan(os.Stdin)
 
 	// signal that pipline is setup
@@ -88,12 +90,27 @@ func safeExit(proc *exec.Cmd) error {
 	}
 }
 
-func openFifo(fifoPath string, mode int) *os.File {
-	fifo, err := os.OpenFile(fifoPath, mode, 0600)
+func openReadCloser(fifoPath string) io.ReadCloser {
+	return openFile(fifoPath, os.O_RDONLY)
+}
+
+func openWriteCloser(fifoPath string) io.WriteCloser {
+	var file io.WriteCloser
+	switch fifoPath {
+	case "":
+		file = new(nullWriteCloser)
+	default:
+		file = openFile(fifoPath, os.O_WRONLY)
+	}
+	return file
+}
+
+func openFile(path string, mode int) *os.File {
+	file, err := os.OpenFile(path, mode, 0600)
 	if err != nil {
 		fatal(err)
 	}
-	return fifo
+	return file
 }
 
 func createCommandExitChan(stdin io.ReadCloser) <-chan struct{} {
