@@ -20,20 +20,20 @@ var versionFlag = flag.Bool("v", false, "print version and exit")
 func main() {
 	flag.Parse()
 
+	initLogger(*logFlag)
+
 	if *versionFlag {
 		fmt.Printf("%s\n", VERSION)
 		os.Exit(0)
 	}
 
-	if pipeExists(*outputFlag) {
-		dieUsage("output is not a pipe")
+	if notFifo(*outputFlag) {
+		dieUsage("output is not a fifo file")
 	}
 
-	if pipeExists(*inputFlag) {
-		dieUsage("input is not a pipe")
+	if notFifo(*inputFlag) {
+		dieUsage("input is not a fifo file")
 	}
-
-	initLogger(*logFlag)
 
 	args := flag.Args()
 	validateArgs(args)
@@ -52,7 +52,7 @@ func validateArgs(args []string) {
 	logger.Printf("Flag values:\n  dir: %v\nArgs: %v\n", *dirFlag, args)
 }
 
-func pipeExists(path string) bool {
+func notFifo(path string) bool {
 	info, err := os.Stat(path)
-	return !os.IsNotExist(err) && info.Mode()&os.ModeNamedPipe == 0
+	return os.IsNotExist(err) || info.Mode()&os.ModeNamedPipe == 0
 }
