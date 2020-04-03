@@ -8,12 +8,12 @@ import (
 
 var buf [1 << 16]byte
 
-func startOutputStreamer(pipe io.ReadCloser, fifo *os.File) <-chan struct{} {
+func startOutputStreamer(pipe io.ReadCloser, writer io.WriteCloser) <-chan struct{} {
 	exit := make(chan struct{})
 	go func() {
 		defer func() {
 			pipe.Close()
-			fifo.Close()
+			writer.Close()
 			close(exit)
 		}()
 
@@ -21,7 +21,7 @@ func startOutputStreamer(pipe io.ReadCloser, fifo *os.File) <-chan struct{} {
 			bytesRead, readErr := pipe.Read(buf[2:])
 			if bytesRead > 0 {
 				write16Be(buf[:2], bytesRead)
-				bytesWritten, writeErr := fifo.Write(buf[:bytesRead+2])
+				bytesWritten, writeErr := writer.Write(buf[:bytesRead+2])
 				if writeErr != nil {
 					switch writeErr.(type) {
 					// ignore broken pipe or closed pipe errors
@@ -43,17 +43,17 @@ func startOutputStreamer(pipe io.ReadCloser, fifo *os.File) <-chan struct{} {
 	return exit
 }
 
-func startInputConsumer(pipe io.WriteCloser, fifo *os.File) {
+func startInputConsumer(pipe io.WriteCloser, reader io.ReadCloser) {
 	buf := make([]byte, 2)
 
 	go func() {
 		defer func() {
-			fifo.Close()
+			reader.Close()
 			pipe.Close()
 		}()
 
 		for {
-			bytesRead, readErr := io.ReadFull(fifo, buf)
+			bytesRead, readErr := io.ReadFull(reader, buf)
 			if readErr == io.EOF && bytesRead == 0 {
 				return
 			}
@@ -65,7 +65,7 @@ func startInputConsumer(pipe io.WriteCloser, fifo *os.File) {
 				return
 			}
 
-			_, writeErr := io.CopyN(pipe, fifo, int64(length))
+			_, writeErr := io.CopyN(pipe, reader, int64(length))
 			if writeErr != nil {
 				switch writeErr.(type) {
 				// ignore broken pipe or closed pipe errors
@@ -74,6 +74,38 @@ func startInputConsumer(pipe io.WriteCloser, fifo *os.File) {
 				default:
 					fatal(writeErr)
 				}
+			}
+		}
+	}()
+}
+
+func startErrorStreamer(pipe io.ReadCloser, writer io.WriteCloser) {
+	go func() {
+		defer func() {
+			pipe.Close()
+			writer.Close()
+		}()
+
+		for {
+			bytesRead, readErr := pipe.Read(buf[2:])
+			if bytesRead > 0 {
+				write16Be(buf[:2], bytesRead)
+				bytesWritten, writeErr := writer.Write(buf[:bytesRead+2])
+				if writeErr != nil {
+					switch writeErr.(type) {
+					// ignore broken pipe or closed pipe errors
+					case *os.PathError:
+						return
+					default:
+						fatal(writeErr)
+					}
+				}
+				logger.Printf("[cmd_err] written bytes: %v\n", bytesWritten)
+
+			} else if readErr == io.EOF && bytesRead == 0 {
+				return
+			} else {
+				fatal(readErr)
 			}
 		}
 	}()

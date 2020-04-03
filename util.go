@@ -38,3 +38,15 @@ func fatalIf(any interface{}) {
 		logger.Panicf("%v\n", any)
 	}
 }
+
+// Helper writeCloser implementations
+
+type nullWriteCloser bool
+
+func (w nullWriteCloser) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
+func (w nullWriteCloser) Close() (err error) {
+	return nil
+}
