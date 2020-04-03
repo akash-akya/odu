@@ -104,8 +104,14 @@ func startErrorStreamer(pipe io.ReadCloser, writer io.WriteCloser) {
 
 			} else if readErr == io.EOF && bytesRead == 0 {
 				return
-			} else {
-				fatal(readErr)
+			} else if readErr != nil {
+				switch readErr.(type) {
+				// ignore broken pipe or closed pipe errors
+				case *os.PathError:
+					return
+				default:
+					fatal(readErr)
+				}
 			}
 		}
 	}()
