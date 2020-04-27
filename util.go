@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"io"
 )
 
 func die(reason string) {
@@ -39,14 +40,31 @@ func fatalIf(any interface{}) {
 	}
 }
 
-// Helper writeCloser implementations
-
-type nullWriteCloser bool
-
-func (w nullWriteCloser) Write(p []byte) (n int, err error) {
-	return len(p), nil
+type NullReadWriteCloser struct{
+	Signal chan struct{}
 }
 
-func (w nullWriteCloser) Close() (err error) {
+func (w NullReadWriteCloser) Write(p []byte) (n int, err error) {
+	select {
+	case <- w.Signal:
+		return 0, new(os.PathError)
+	default:
+		return len(p), nil
+	}
+}
+
+func (w NullReadWriteCloser) Read(p []byte) (n int, err error) {
+	select {
+	case <- w.Signal:
+		return 0, io.EOF
+	}
+}
+
+func (w NullReadWriteCloser) Close() (err error) {
+	select {
+	case <- w.Signal:
+	default:
+		close(w.Signal)
+	}
 	return nil
 }
