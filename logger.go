@@ -12,7 +12,9 @@ func initLogger(flag string) {
 	var file io.Writer
 	switch flag {
 	case "":
-		file = new(nullWriteCloser)
+		file = NullReadWriteCloser{
+			Signal: make(chan struct{}, 1),
+		}
 	case "|1":
 		file = os.Stdout
 	case "|2":
