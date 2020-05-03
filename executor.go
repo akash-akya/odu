@@ -16,10 +16,7 @@ func executor(workdir string, inputFifoPath string, outputFifoPath string, error
 
 	signal := make(chan struct{})
 
-	stdinFifo := openReadCloser(inputFifoPath, signal)
-	stdoutFifo := openWriteCloser(outputFifoPath, signal)
-	stderrFifo := openWriteCloser(errorFifoPath, signal)
-
+	stdinFifo, stdoutFifo, stderrFifo := openIOFiles(inputFifoPath, outputFifoPath, errorFifoPath, signal)
 	outputStreamerExit, commandExit := startPipeline(proc, stdinFifo, stdoutFifo, stderrFifo)
 
 	err := proc.Start()
@@ -44,6 +41,29 @@ func executor(workdir string, inputFifoPath string, outputFifoPath string, error
 	// TODO: return Stderr and exit stauts to beam process
 	logger.Printf("Run FINISHED: %#v\n", err)
 	return err
+}
+
+func openIOFiles(inputFifoPath string, outputFifoPath string, errorFifoPath string, signal chan struct{})(io.ReadCloser, io.WriteCloser,io.WriteCloser){
+	ioReady := make(chan struct{})
+	var stdinFifo io.ReadCloser
+	var stdoutFifo io.WriteCloser
+	var stderrFifo io.WriteCloser
+
+	go func() {
+		defer close(ioReady)
+		stdinFifo = openReadCloser(inputFifoPath, signal)
+		stdoutFifo = openWriteCloser(outputFifoPath, signal)
+		stderrFifo = openWriteCloser(errorFifoPath, signal)
+	}()
+
+	// do not wait for FIFO files to open indefinitely
+	select {
+	case <-time.After(5 * time.Second):
+		close(signal)
+		fatal("FIFO files open timeout. Make sure fifo files are opened at other end")
+	case <-ioReady:
+	}
+	return stdinFifo, stdoutFifo, stderrFifo
 }
 
 func startPipeline(proc *exec.Cmd, stdinFifo io.ReadCloser, stdoutFifo io.WriteCloser, stderrFifo io.WriteCloser) (<-chan struct{}, <-chan struct{}) {
