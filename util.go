@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"io"
+	"os"
 )
 
 func die(reason string) {
@@ -40,13 +40,13 @@ func fatalIf(any interface{}) {
 	}
 }
 
-type NullReadWriteCloser struct{
+type NullReadWriteCloser struct {
 	Signal chan struct{}
 }
 
 func (w NullReadWriteCloser) Write(p []byte) (n int, err error) {
 	select {
-	case <- w.Signal:
+	case <-w.Signal:
 		return 0, new(os.PathError)
 	default:
 		return len(p), nil
@@ -55,14 +55,14 @@ func (w NullReadWriteCloser) Write(p []byte) (n int, err error) {
 
 func (w NullReadWriteCloser) Read(p []byte) (n int, err error) {
 	select {
-	case <- w.Signal:
+	case <-w.Signal:
 		return 0, io.EOF
 	}
 }
 
 func (w NullReadWriteCloser) Close() (err error) {
 	select {
-	case <- w.Signal:
+	case <-w.Signal:
 	default:
 		close(w.Signal)
 	}
