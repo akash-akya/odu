@@ -6,7 +6,7 @@ import (
 	"os/exec"
 )
 
-func execCommand(proc *exec.Cmd, input <-chan []byte, inputDemand chan<- bool, outputDemand <-chan bool, close_stdin chan struct{}) <-chan []byte {
+func startCommandPipeline(proc *exec.Cmd, input <-chan Packet, inputDemand chan<- Packet, outputDemand <-chan Packet) <-chan Packet {
 	cmdInput, err := proc.StdinPipe()
 	fatalIf(err)
 
@@ -19,56 +19,40 @@ func execCommand(proc *exec.Cmd, input <-chan []byte, inputDemand chan<- bool, o
 	execErr := proc.Start()
 	fatalIf(execErr)
 
-	output := make(chan []byte)
+	go writeToCommandStdin(cmdInput, input, inputDemand)
 
-	go func() {
-		var buf [BufferSize - 1]byte
-		var pipe io.ReadCloser
+	output := make(chan Packet)
+	go readCommandStdout(cmdOutput, outputDemand, output)
 
-		pipe = cmdOutput
+	return output
+}
 
-		defer func() {
-			cmdOutput.Close()
-			close(output)
-		}()
+func writeToCommandStdin(cmdInput io.WriteCloser, input <-chan Packet, inputDemand chan<- Packet) {
+	var packet Packet
+	var ok bool
 
-		for {
-			<-outputDemand
-
-			// blocking
-			bytesRead, readErr := pipe.Read(buf[:])
-			if bytesRead > 0 {
-				output <- buf[:bytesRead]
-			} else if readErr == io.EOF || bytesRead == 0 {
-				return
-			} else {
-				fatal(readErr)
-			}
-		}
+	defer func() {
+		cmdInput.Close()
+		// close(inputDemand)
 	}()
 
-	go func() {
-		var in []byte
-		var ok bool
+	for {
+		inputDemand <- Packet{SendInput, make([]byte, 0)}
 
-		defer func() {
-			cmdInput.Close()
-		}()
-
-		inputDemand <- true
-
-		for {
-			select {
-			case <-close_stdin:
+		select {
+		case packet, ok = <-input:
+			if !ok {
 				return
-			case in, ok = <-input:
-				if !ok {
-					return
-				}
 			}
+		}
 
+		switch packet.tag {
+		case CloseInput:
+			return
+
+		case Input:
 			// blocking
-			_, writeErr := cmdInput.Write(in)
+			_, writeErr := cmdInput.Write(packet.data)
 			if writeErr != nil {
 				switch writeErr.(type) {
 				// ignore broken pipe or closed pipe errors
@@ -78,9 +62,35 @@ func execCommand(proc *exec.Cmd, input <-chan []byte, inputDemand chan<- bool, o
 					fatal(writeErr)
 				}
 			}
-			inputDemand <- true
 		}
+	}
+}
+
+func readCommandStdout(cmdOutput io.ReadCloser, outputDemand <-chan Packet, output chan<- Packet) {
+	var buf [BufferSize]byte
+
+	defer func() {
+		output <- Packet{OutputEOF, make([]byte, 0)}
+		cmdOutput.Close()
+		close(output)
 	}()
 
-	return output
+	for {
+		select {
+		case _, ok := <-outputDemand:
+			if !ok {
+				return
+			}
+		}
+
+		// blocking
+		bytesRead, readErr := cmdOutput.Read(buf[:])
+		if bytesRead > 0 {
+			output <- Packet{Output, buf[:bytesRead]}
+		} else if readErr == io.EOF || bytesRead == 0 {
+			return
+		} else {
+			fatal(readErr)
+		}
+	}
 }

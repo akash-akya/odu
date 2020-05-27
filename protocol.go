@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
 )
@@ -14,109 +15,102 @@ const CloseInput = 5
 const OutputEOF = 6
 
 // This size is *NOT* related to pipe buffer size
-const BufferSize = 1 << 16
+// 4 bytes for payload length + 1 byte for tag
+const BufferSize = (1 << 16) - 5
 
-type Command struct {
+type Packet struct {
 	tag  uint8
 	data []byte
 }
 
-func stdinReader(done <-chan struct{}) <-chan Command {
-	stdinChan := make(chan Command)
+type InputDispatcher func(Packet)
 
-	go func() {
-		defer func() {
-			close(stdinChan)
-		}()
-
-		var readErr error
-		var length uint32
-		var tag uint8
-
-		for {
-			select {
-			case <-done:
-				return
-			default:
-			}
-
-			inputBuf := make([]byte, BufferSize)
-
-			length, readErr = readUint32(os.Stdin)
-			if readErr == io.EOF {
-				return
-			} else if readErr != nil {
-				fatal(readErr)
-			}
-
-			if length < 1 || length > (BufferSize-4) { // payload must be atleast tag size
-				fatal("input payload size is invalid")
-			}
-
-			tag, readErr = readUint8(os.Stdin)
-			if readErr != nil {
-				fatal(readErr)
-			}
-
-			_, readErr := io.ReadFull(os.Stdin, inputBuf[:length-1])
-			if readErr != nil {
-				fatal(readErr)
-			}
-
-			stdinChan <- Command{tag, inputBuf[:length-1]}
+func stdinReader(dispatch InputDispatcher, done <-chan struct{}) {
+	for {
+		select {
+		case <-done:
+			return
+		default:
 		}
-	}()
 
-	return stdinChan
+		packet, readErr := readPacket()
+		if readErr == io.EOF {
+			return
+		}
+		fatalIf(readErr)
+
+		dispatch(packet)
+	}
 }
 
-func stdoutWriter() chan<- Command {
-	stdoutChan := make(chan Command)
+type OutPacket func() (Packet, bool)
 
-	go func() {
-		var cmd Command
-		var ok bool
-		buf := make([]byte, BufferSize)
+func stdoutWriter(fn OutPacket, done <-chan struct{}) {
+	var ok bool
+	var packet Packet
+	buf := make([]byte, BufferSize+5)
 
-		defer func() {
-			close(stdoutChan)
-		}()
-
-		for {
-			select {
-			case cmd, ok = <-stdoutChan:
-				if !ok {
-					return
-				}
-			}
-
-			payloadLen := len(cmd.data) + 1
-			total := payloadLen + 4
-
-			if total > BufferSize {
-				fatal("Invalid payloadLen")
-			}
-
-			writeUint32Be(buf[:4], uint32(payloadLen))
-			writeUint8Be(buf[4:5], cmd.tag)
-
-			copy(buf[5:], cmd.data)
-
-			_, writeErr := os.Stdout.Write(buf[:total])
-			if writeErr != nil {
-				switch writeErr.(type) {
-				// ignore broken pipe or closed pipe errors
-				case *os.PathError:
-					return
-				default:
-					fatal(writeErr)
-				}
-			}
-			// logger.Printf("stdout written bytes: %v\n", bytesWritten)
+	for {
+		packet, ok = fn()
+		if !ok {
+			return
 		}
-	}()
 
-	return stdoutChan
+		if len(packet.data) > BufferSize {
+			fatal("Invalid payloadLen")
+		}
+
+		payloadLen := len(packet.data) + 1
+
+		writeUint32Be(buf[:4], uint32(payloadLen))
+		writeUint8Be(buf[4:5], packet.tag)
+
+		copy(buf[5:], packet.data)
+
+		_, writeErr := os.Stdout.Write(buf[:payloadLen+4])
+		if writeErr != nil {
+			switch writeErr.(type) {
+			// ignore broken pipe or closed pipe errors
+			case *os.PathError:
+				return
+			default:
+				fatal(writeErr)
+			}
+		}
+		// logger.Printf("stdout written bytes: %v\n", bytesWritten)
+	}
+}
+
+func readPacket() (Packet, error) {
+	var readErr error
+	var length uint32
+	var tag uint8
+
+	buf := make([]byte, BufferSize)
+
+	length, readErr = readUint32(os.Stdin)
+	if readErr == io.EOF {
+		return Packet{}, io.EOF
+	} else if readErr != nil {
+		return Packet{}, readErr
+	}
+
+	dataLen := length - 1
+	if dataLen < 0 || dataLen > BufferSize { // payload must be atleast tag size
+		return Packet{}, errors.New("input payload size is invalid")
+	}
+
+	tag, readErr = readUint8(os.Stdin)
+	if readErr != nil {
+		return Packet{}, readErr
+	}
+
+	_, readErr = io.ReadFull(os.Stdin, buf[:dataLen])
+	if readErr != nil {
+		return Packet{}, readErr
+	}
+
+	return Packet{tag, buf[:dataLen]}, nil
 }
 
 func readUint32(stdin io.Reader) (uint32, error) {

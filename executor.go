@@ -6,26 +6,20 @@ import (
 	"time"
 )
 
-func executor(workdir string, args []string) error {
-	closeStdin := make(chan struct{})
+func execute(workdir string, args []string) error {
 	done := make(chan struct{})
-	input := make(chan []byte, 1)
 
-	outputDemand := make(chan bool, 1) // buffered
-	inputDemand := make(chan bool)
-
-	defer func() {
-		close(outputDemand)
-		close(input)
-	}()
+	input := make(chan Packet, 1)
+	outputDemand := make(chan Packet)
+	inputDemand := make(chan Packet)
 
 	proc := exec.Command(args[0], args[1:]...)
 	proc.Dir = workdir
 	logger.Printf("Command path: %v\n", proc.Path)
 
-	output := execCommand(proc, input, inputDemand, outputDemand, closeStdin)
-	go inputCommandDispatcher(input, outputDemand, done, closeStdin)
-	go outputCommandDispatcher(output, inputDemand, done)
+	output := startCommandPipeline(proc, input, inputDemand, outputDemand)
+	go dispatchStdin(input, outputDemand, done)
+	go collectStdout(output, inputDemand, done)
 
 	// wait for pipline to exit
 	<-done
@@ -42,76 +36,40 @@ func executor(workdir string, args []string) error {
 	return err
 }
 
-func inputCommandDispatcher(input chan<- []byte, outputDemand chan<- bool, done chan struct{}, closeStdin chan struct{}) {
-	stdinChan := stdinReader(done)
-
-	var cmd Command
-	var ok bool
-
-	cmdStdinClosed := false
-
-	defer func() {
-		if !cmdStdinClosed {
-			close(closeStdin)
-		}
-	}()
-
-	for {
-		select {
-		case cmd, ok = <-stdinChan:
-			if !ok {
-				close(done)
-				return
-			}
-		case <-done:
-			return
-		}
-
-		switch cmd.tag {
-		case CloseInput:
-			if !cmdStdinClosed {
-				logger.Printf(" --> CLOSE_INPUT\n")
-				close(closeStdin)
-				cmdStdinClosed = true
-			}
-		case Input:
-			logger.Printf(" --> INPUT %v\n", len(cmd.data))
-			// we use buffered input because this should not block
-			input <- cmd.data
+func dispatchStdin(input chan<- Packet, outputDemand chan<- Packet, done chan struct{}) {
+	// closeChan := closeInputHandler(input)
+	var dispatch = func(packet Packet) {
+		switch packet.tag {
 		case SendOutput:
-			logger.Printf(" --> SEND_OUTPUT\n")
-			// we use buffered outputDemand because this should not block
-			select {
-			case outputDemand <- true:
-			default:
-				fatal("outputDemand channel is full")
-			}
+			outputDemand <- packet
+		default:
+			input <- packet
 		}
 	}
 
+	defer func() {
+		close(input)
+		close(outputDemand)
+	}()
+
+	stdinReader(dispatch, done)
 }
 
-func outputCommandDispatcher(output <-chan []byte, inputDemand <-chan bool, done chan struct{}) {
-	stdoutChan := stdoutWriter()
-
+func collectStdout(output <-chan Packet, inputDemand <-chan Packet, done chan struct{}) {
 	defer func() {
 		close(done)
 	}()
 
-	for {
+	merged := func() (Packet, bool) {
 		select {
-		case <-inputDemand:
-			logger.Printf("<--  SEND_INPUT\n")
-			stdoutChan <- Command{SendInput, make([]byte, 0)}
-		case out, ok := <-output:
-			logger.Printf("<--  OUTPUT\n")
-			if !ok {
-				stdoutChan <- Command{OutputEOF, make([]byte, 0)}
-				return
-			}
-			stdoutChan <- Command{Output, out}
+		case v, ok := <-inputDemand:
+			return v, ok
+		case v, ok := <-output:
+			return v, ok
 		}
 	}
+
+	stdoutWriter(merged, done)
 }
 
 func safeExit(proc *exec.Cmd) error {

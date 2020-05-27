@@ -28,7 +28,7 @@ func main() {
 	args := flag.Args()
 	validateArgs(args)
 
-	err := executor(*dirFlag, args)
+	err := execute(*dirFlag, args)
 	if err != nil {
 		os.Exit(getExitStatus(err))
 	}
