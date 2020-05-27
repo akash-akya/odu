@@ -22,7 +22,7 @@ func execCommand(proc *exec.Cmd, input <-chan []byte, inputDemand chan<- bool, o
 	output := make(chan []byte)
 
 	go func() {
-		var buf [16384 - 10]byte
+		var buf [BufferSize - 1]byte
 		var pipe io.ReadCloser
 
 		pipe = cmdOutput
@@ -46,8 +46,6 @@ func execCommand(proc *exec.Cmd, input <-chan []byte, inputDemand chan<- bool, o
 			}
 		}
 	}()
-
-	// inputDemand := make(chan bool)
 
 	go func() {
 		var in []byte

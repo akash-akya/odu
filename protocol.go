@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"io"
 	"os"
 )
@@ -12,8 +13,11 @@ const Input = 4
 const CloseInput = 5
 const OutputEOF = 6
 
+// This size is *NOT* related to pipe buffer size
+const BufferSize = 1 << 16
+
 type Command struct {
-	tag  uint16
+	tag  uint8
 	data []byte
 }
 
@@ -26,8 +30,8 @@ func stdinReader(done <-chan struct{}) <-chan Command {
 		}()
 
 		var readErr error
-		var length uint16
-		var tag uint16
+		var length uint32
+		var tag uint8
 
 		for {
 			select {
@@ -36,30 +40,30 @@ func stdinReader(done <-chan struct{}) <-chan Command {
 			default:
 			}
 
-			inputBuf := make([]byte, 16384-1)
+			inputBuf := make([]byte, BufferSize)
 
-			length, readErr = readUint16(os.Stdin)
+			length, readErr = readUint32(os.Stdin)
 			if readErr == io.EOF {
 				return
 			} else if readErr != nil {
 				fatal(readErr)
 			}
 
-			if length < 2 || length > 16384 { // payload must be atleast tag size
+			if length < 1 || length > (BufferSize-4) { // payload must be atleast tag size
 				fatal("input payload size is invalid")
 			}
 
-			tag, readErr = readUint16(os.Stdin)
+			tag, readErr = readUint8(os.Stdin)
 			if readErr != nil {
 				fatal(readErr)
 			}
 
-			_, readErr := io.ReadFull(os.Stdin, inputBuf[:length-2])
+			_, readErr := io.ReadFull(os.Stdin, inputBuf[:length-1])
 			if readErr != nil {
 				fatal(readErr)
 			}
 
-			stdinChan <- Command{tag, inputBuf[:length-2]}
+			stdinChan <- Command{tag, inputBuf[:length-1]}
 		}
 	}()
 
@@ -72,7 +76,7 @@ func stdoutWriter() chan<- Command {
 	go func() {
 		var cmd Command
 		var ok bool
-		buf := make([]byte, 16384)
+		buf := make([]byte, BufferSize)
 
 		defer func() {
 			close(stdoutChan)
@@ -86,16 +90,17 @@ func stdoutWriter() chan<- Command {
 				}
 			}
 
-			payloadLen := len(cmd.data) + 2
-			total := payloadLen + 2
+			payloadLen := len(cmd.data) + 1
+			total := payloadLen + 4
 
-			if total > 16384 {
+			if total > BufferSize {
 				fatal("Invalid payloadLen")
 			}
 
-			write16Be(buf[:2], payloadLen)
-			write16Be(buf[2:4], int(cmd.tag))
-			copy(buf[4:], cmd.data)
+			writeUint32Be(buf[:4], uint32(payloadLen))
+			writeUint8Be(buf[4:5], cmd.tag)
+
+			copy(buf[5:], cmd.data)
 
 			_, writeErr := os.Stdout.Write(buf[:total])
 			if writeErr != nil {
@@ -114,14 +119,34 @@ func stdoutWriter() chan<- Command {
 	return stdoutChan
 }
 
-func readUint16(stdin io.Reader) (uint16, error) {
-	buf := make([]byte, 2)
+func readUint32(stdin io.Reader) (uint32, error) {
+	var buf [4]byte
 
-	bytesRead, readErr := io.ReadFull(stdin, buf)
+	bytesRead, readErr := io.ReadFull(stdin, buf[:])
 	if readErr != nil {
 		return 0, io.EOF
 	} else if bytesRead == 0 {
 		return 0, readErr
 	}
-	return read16Be(buf), nil
+	return binary.BigEndian.Uint32(buf[:]), nil
+}
+
+func readUint8(stdin io.Reader) (uint8, error) {
+	var buf [1]byte
+
+	bytesRead, readErr := io.ReadFull(stdin, buf[:])
+	if readErr != nil {
+		return 0, io.EOF
+	} else if bytesRead == 0 {
+		return 0, readErr
+	}
+	return uint8(buf[0]), nil
+}
+
+func writeUint32Be(data []byte, num uint32) {
+	binary.BigEndian.PutUint32(data, num)
+}
+
+func writeUint8Be(data []byte, num uint8) {
+	data[0] = byte(num)
 }

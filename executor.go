@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"os"
 	"os/exec"
 	"time"
@@ -130,17 +129,4 @@ func safeExit(proc *exec.Cmd) error {
 	case err := <-done:
 		return err
 	}
-}
-
-func read16Be(data []byte) uint16 {
-	return binary.BigEndian.Uint16(data)
-}
-
-func read32Be(data []byte) uint32 {
-	return binary.BigEndian.Uint32(data)
-}
-
-func write16Be(data []byte, num int) {
-	data[0] = byte(num >> 8)
-	data[1] = byte(num)
 }
