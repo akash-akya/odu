@@ -11,7 +11,7 @@ const VERSION = "0.1.0"
 
 const usage = "Usage: odu [options] -- <program> [<arg>...]"
 
-var dirFlag = flag.String("dir", ".", "working directory for the spawned process")
+var cdFlag = flag.String("cd", ".", "working directory for the spawned process")
 var logFlag = flag.String("log", "", "enable logging")
 var versionFlag = flag.Bool("v", false, "print version and exit")
 
@@ -28,7 +28,7 @@ func main() {
 	args := flag.Args()
 	validateArgs(args)
 
-	err := execute(*dirFlag, args)
+	err := execute(*cdFlag, args)
 	if err != nil {
 		os.Exit(getExitStatus(err))
 	}
@@ -39,7 +39,7 @@ func validateArgs(args []string) {
 		dieUsage("Not enough arguments.")
 	}
 
-	logger.Printf("Flag values:\n  dir: %v\nArgs: %v\n", *dirFlag, args)
+	logger.Printf("Flag values:\n  dir: %v\nArgs: %v\n", *cdFlag, args)
 }
 
 func notFifo(path string) bool {
