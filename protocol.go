@@ -14,6 +14,7 @@ const Input = 4
 const CloseInput = 5
 const OutputEOF = 6
 const CommandEnv = 7
+const Pid = 8
 
 // This size is *NOT* related to pipe buffer size
 // 4 bytes for payload length + 1 byte for tag
@@ -46,10 +47,16 @@ func stdinReader(dispatch InputDispatcher, done <-chan struct{}) {
 
 type OutPacket func() (Packet, bool)
 
-func stdoutWriter(fn OutPacket, done <-chan struct{}) {
+func stdoutWriter(pid int, fn OutPacket, done <-chan struct{}) {
 	var ok bool
 	var packet Packet
 	buf := make([]byte, BufferSize+5)
+
+	// we first write pid before writing anything
+	writeUint32Be(buf[:4], 4 + 1)
+	writeUint8Be(buf[4:5], Pid)
+	writeUint32Be(buf[5:9], uint32(pid))
+	writePacket(buf[:9])
 
 	for {
 		packet, ok = fn()
@@ -67,18 +74,7 @@ func stdoutWriter(fn OutPacket, done <-chan struct{}) {
 		writeUint8Be(buf[4:5], packet.tag)
 
 		copy(buf[5:], packet.data)
-
-		_, writeErr := os.Stdout.Write(buf[:payloadLen+4])
-		if writeErr != nil {
-			switch writeErr.(type) {
-			// ignore broken pipe or closed pipe errors
-			case *os.PathError:
-				return
-			default:
-				fatal(writeErr)
-			}
-		}
-		// logger.Printf("stdout written bytes: %v\n", bytesWritten)
+		writePacket(buf[:payloadLen+4])
 	}
 }
 
@@ -142,6 +138,20 @@ func readPacket() (Packet, error) {
 	}
 
 	return Packet{tag, buf[:dataLen]}, nil
+}
+
+func writePacket(buf []byte) {
+	_, writeErr := os.Stdout.Write(buf)
+	if writeErr != nil {
+		switch writeErr.(type) {
+		// ignore broken pipe or closed pipe errors
+		case *os.PathError:
+			return
+		default:
+			fatal(writeErr)
+		}
+	}
+	// logger.Printf("stdout written bytes: %v\n", bytesWritten)
 }
 
 func readUint32(stdin io.Reader) (uint32, error) {

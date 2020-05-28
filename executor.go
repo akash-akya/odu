@@ -21,7 +21,7 @@ func execute(workdir string, args []string) error {
 
 	output := startCommandPipeline(proc, input, inputDemand, outputDemand)
 	go dispatchStdin(input, outputDemand, done)
-	go collectStdout(output, inputDemand, done)
+	go collectStdout(proc.Process.Pid, output, inputDemand, done)
 
 	// wait for pipline to exit
 	<-done
@@ -57,7 +57,7 @@ func dispatchStdin(input chan<- Packet, outputDemand chan<- Packet, done chan st
 	stdinReader(dispatch, done)
 }
 
-func collectStdout(output <-chan Packet, inputDemand <-chan Packet, done chan struct{}) {
+func collectStdout(pid int, output <-chan Packet, inputDemand <-chan Packet, done chan struct{}) {
 	defer func() {
 		close(done)
 	}()
@@ -71,7 +71,7 @@ func collectStdout(output <-chan Packet, inputDemand <-chan Packet, done chan st
 		}
 	}
 
-	stdoutWriter(merged, done)
+	stdoutWriter(pid, merged, done)
 }
 
 func safeExit(proc *exec.Cmd) error {
