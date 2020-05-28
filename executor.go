@@ -15,6 +15,8 @@ func execute(workdir string, args []string) error {
 
 	proc := exec.Command(args[0], args[1:]...)
 	proc.Dir = workdir
+	proc.Env = append(os.Environ(), readEnvFromStdin()...)
+
 	logger.Printf("Command path: %v\n", proc.Path)
 
 	output := startCommandPipeline(proc, input, inputDemand, outputDemand)

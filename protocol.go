@@ -13,6 +13,7 @@ const Output = 3
 const Input = 4
 const CloseInput = 5
 const OutputEOF = 6
+const CommandEnv = 7
 
 // This size is *NOT* related to pipe buffer size
 // 4 bytes for payload length + 1 byte for tag
@@ -79,6 +80,36 @@ func stdoutWriter(fn OutPacket, done <-chan struct{}) {
 		}
 		// logger.Printf("stdout written bytes: %v\n", bytesWritten)
 	}
+}
+
+func readEnvFromStdin() []string {
+	// first packet must be env
+	packet, err := readPacket()
+	if err != nil {
+		fatal(err)
+	}
+
+	if packet.tag != CommandEnv {
+		fatal("First packet must be command Env")
+	}
+
+	var env []string
+	var length int
+	data := packet.data
+
+	for i := 0; i < len(data); {
+		length = int(binary.BigEndian.Uint16(data[i:i+2]))
+		i += 2
+
+		entry := string(data[i:i+length])
+		env = append(env, entry)
+
+		i += length
+	}
+
+	logger.Printf("Command Env: %v\n", env)
+
+	return env
 }
 
 func readPacket() (Packet, error) {
