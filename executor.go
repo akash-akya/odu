@@ -1,90 +1,77 @@
 package main
 
 import (
-	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"time"
 )
 
-func executor(workdir string, inputFifoPath string, outputFifoPath string, errorFifoPath string, args []string) error {
+func execute(workdir string, args []string) error {
+	done := make(chan struct{})
+
+	input := make(chan Packet, 1)
+	outputDemand := make(chan Packet)
+	inputDemand := make(chan Packet)
+
 	proc := exec.Command(args[0], args[1:]...)
 	proc.Dir = workdir
+	proc.Env = append(os.Environ(), readEnvFromStdin()...)
 
 	logger.Printf("Command path: %v\n", proc.Path)
 
-	signal := make(chan struct{})
-
-	stdinFifo, stdoutFifo, stderrFifo := openIOFiles(inputFifoPath, outputFifoPath, errorFifoPath, signal)
-	outputStreamerExit, commandExit := startPipeline(proc, stdinFifo, stdoutFifo, stderrFifo)
-
-	err := proc.Start()
-	fatalIf(err)
+	output := startCommandPipeline(proc, input, inputDemand, outputDemand)
+	go dispatchStdin(input, outputDemand, done)
+	go collectStdout(proc.Process.Pid, output, inputDemand, done)
 
 	// wait for pipline to exit
-	select {
-	case <-outputStreamerExit:
-	case <-commandExit:
-	}
+	<-done
 
-	// signal that command is completed
-	close(signal)
-
-	err = safeExit(proc)
+	err := safeExit(proc)
 	if e, ok := err.(*exec.Error); ok {
 		// This shouldn't really happen in practice because we check for
 		// program existence in Elixir, before launching odu
-		logger.Printf("Run ERROR: %v\n", e)
+		logger.Printf("Command exited with error: %v\n", e)
 		os.Exit(3)
 	}
 	// TODO: return Stderr and exit stauts to beam process
-	logger.Printf("Run FINISHED: %#v\n", err)
+	logger.Printf("Command exited: %#v\n", err)
 	return err
 }
 
-func openIOFiles(inputFifoPath string, outputFifoPath string, errorFifoPath string, signal chan struct{})(io.ReadCloser, io.WriteCloser,io.WriteCloser){
-	ioReady := make(chan struct{})
-	var stdinFifo io.ReadCloser
-	var stdoutFifo io.WriteCloser
-	var stderrFifo io.WriteCloser
+func dispatchStdin(input chan<- Packet, outputDemand chan<- Packet, done chan struct{}) {
+	// closeChan := closeInputHandler(input)
+	var dispatch = func(packet Packet) {
+		switch packet.tag {
+		case SendOutput:
+			outputDemand <- packet
+		default:
+			input <- packet
+		}
+	}
 
-	go func() {
-		defer close(ioReady)
-		stdinFifo = openReadCloser(inputFifoPath, signal)
-		stdoutFifo = openWriteCloser(outputFifoPath, signal)
-		stderrFifo = openWriteCloser(errorFifoPath, signal)
+	defer func() {
+		close(input)
+		close(outputDemand)
 	}()
 
-	// do not wait for FIFO files to open indefinitely
-	select {
-	case <-time.After(5 * time.Second):
-		close(signal)
-		fatal("FIFO files open timeout. Make sure fifo files are opened at other end")
-	case <-ioReady:
-	}
-	return stdinFifo, stdoutFifo, stderrFifo
+	stdinReader(dispatch, done)
 }
 
-func startPipeline(proc *exec.Cmd, stdinFifo io.ReadCloser, stdoutFifo io.WriteCloser, stderrFifo io.WriteCloser) (<-chan struct{}, <-chan struct{}) {
-	// some commands expect stdin to be connected
-	cmdInput, err := proc.StdinPipe()
-	fatalIf(err)
+func collectStdout(pid int, output <-chan Packet, inputDemand <-chan Packet, done chan struct{}) {
+	defer func() {
+		close(done)
+	}()
 
-	cmdOutput, err := proc.StdoutPipe()
-	fatalIf(err)
+	merged := func() (Packet, bool) {
+		select {
+		case v, ok := <-inputDemand:
+			return v, ok
+		case v, ok := <-output:
+			return v, ok
+		}
+	}
 
-	cmdError, err := proc.StderrPipe()
-	fatalIf(err)
-
-	logger.Println("Starting pipeline")
-
-	startInputConsumer(cmdInput, stdinFifo)
-	outputStreamerExit := startOutputStreamer(cmdOutput, stdoutFifo)
-	startErrorStreamer(cmdError, stderrFifo)
-	commandExit := createCommandExitChan(os.Stdin)
-
-	return outputStreamerExit, commandExit
+	stdoutWriter(pid, merged, done)
 }
 
 func safeExit(proc *exec.Cmd) error {
@@ -102,57 +89,4 @@ func safeExit(proc *exec.Cmd) error {
 	case err := <-done:
 		return err
 	}
-}
-
-func openReadCloser(fifoPath string, signal <-chan struct{}) io.ReadCloser {
-	switch fifoPath {
-	case "":
-		writer := NullReadWriteCloser{
-			Signal: make(chan struct{}),
-		}
-		linkChannel(writer, signal)
-		return writer
-	default:
-		return openFile(fifoPath, os.O_RDONLY)
-	}
-}
-
-func openWriteCloser(fifoPath string, signal <-chan struct{}) io.WriteCloser {
-	switch fifoPath {
-	case "":
-		reader := NullReadWriteCloser{
-			Signal: make(chan struct{}),
-		}
-		linkChannel(reader, signal)
-		return reader
-	default:
-		return openFile(fifoPath, os.O_WRONLY)
-	}
-}
-
-func openFile(path string, mode int) *os.File {
-	file, err := os.OpenFile(path, mode, 0600)
-	if err != nil {
-		fatal(err)
-	}
-	return file
-}
-
-func createCommandExitChan(stdin io.ReadCloser) <-chan struct{} {
-	exitSignal := make(chan struct{})
-	go func() {
-		defer close(exitSignal)
-
-		_, err := io.Copy(ioutil.Discard, stdin)
-		fatalIf(err)
-	}()
-
-	return exitSignal
-}
-
-func linkChannel(closer io.Closer, b <-chan struct{}) {
-	go func(){
-		<-b
-		closer.Close()
-	}()
 }
