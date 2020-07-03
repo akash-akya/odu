@@ -6,13 +6,17 @@ import (
 	"os"
 )
 
-// VERSION of the odu
-const VERSION = "0.1.0"
+// Version of the odu
+const Version = "0.1.0"
+
+// Supported protocol version
+const ProtocolVersion = "1.0"
 
 const usage = "Usage: odu [options] -- <program> [<arg>...]"
 
 var cdFlag = flag.String("cd", ".", "working directory for the spawned process")
 var logFlag = flag.String("log", "", "enable logging")
+var protocolVersionFlag = flag.String("protocol_version", "", "protocol version")
 var versionFlag = flag.Bool("v", false, "print version and exit")
 
 func main() {
@@ -21,7 +25,7 @@ func main() {
 	initLogger(*logFlag)
 
 	if *versionFlag {
-		fmt.Printf("%s\n", VERSION)
+		fmt.Printf("odu version: %s\nprotocol_version: %s", Version, ProtocolVersion)
 		os.Exit(0)
 	}
 
@@ -39,7 +43,11 @@ func validateArgs(args []string) {
 		dieUsage("Not enough arguments.")
 	}
 
-	logger.Printf("Flag values:\n  dir: %v\nArgs: %v\n", *cdFlag, args)
+	if *protocolVersionFlag != "1.0" {
+		dieUsage(fmt.Sprintf("Invalid version specified: %v  Supported version: %v", *protocolVersionFlag, ProtocolVersion))
+	}
+
+	logger.Printf("Flag values:\n  dir: %v\n  log: %v\n  protocol_version: %v\n  Args: %v\n", *cdFlag, *logFlag, *protocolVersionFlag, args)
 }
 
 func notFifo(path string) bool {
