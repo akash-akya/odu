@@ -18,6 +18,9 @@ func dieUsage(reason string) {
 	if logger != nil {
 		logger.Printf("dying: %v\n", reason)
 	}
+
+	writeStartError(reason)
+
 	fmt.Fprintf(os.Stderr, "%v\n%v\n", reason, usage)
 	os.Exit(-1)
 }

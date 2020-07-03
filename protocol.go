@@ -15,6 +15,7 @@ const CloseInput = 5
 const OutputEOF = 6
 const CommandEnv = 7
 const Pid = 8
+const StartError = 9
 
 // This size is *NOT* related to pipe buffer size
 // 4 bytes for payload length + 1 byte for tag
@@ -50,13 +51,12 @@ type OutPacket func() (Packet, bool)
 func stdoutWriter(pid int, fn OutPacket, done <-chan struct{}) {
 	var ok bool
 	var packet Packet
-	buf := make([]byte, BufferSize+5)
+
+	var buf [4]byte
 
 	// we first write pid before writing anything
-	writeUint32Be(buf[:4], 4 + 1)
-	writeUint8Be(buf[4:5], Pid)
-	writeUint32Be(buf[5:9], uint32(pid))
-	writePacket(buf[:9])
+	writeUint32Be(buf[:], uint32(pid))
+	writePacket(Pid, buf[:])
 
 	for {
 		packet, ok = fn()
@@ -68,14 +68,12 @@ func stdoutWriter(pid int, fn OutPacket, done <-chan struct{}) {
 			fatal("Invalid payloadLen")
 		}
 
-		payloadLen := len(packet.data) + 1
-
-		writeUint32Be(buf[:4], uint32(payloadLen))
-		writeUint8Be(buf[4:5], packet.tag)
-
-		copy(buf[5:], packet.data)
-		writePacket(buf[:payloadLen+4])
+		writePacket(packet.tag, packet.data)
 	}
+}
+
+func writeStartError(reason string) {
+	writePacket(StartError, []byte(reason))
 }
 
 func readEnvFromStdin() []string {
@@ -94,10 +92,10 @@ func readEnvFromStdin() []string {
 	data := packet.data
 
 	for i := 0; i < len(data); {
-		length = int(binary.BigEndian.Uint16(data[i:i+2]))
+		length = int(binary.BigEndian.Uint16(data[i : i+2]))
 		i += 2
 
-		entry := string(data[i:i+length])
+		entry := string(data[i : i+length])
 		env = append(env, entry)
 
 		i += length
@@ -140,8 +138,16 @@ func readPacket() (Packet, error) {
 	return Packet{tag, buf[:dataLen]}, nil
 }
 
-func writePacket(buf []byte) {
-	_, writeErr := os.Stdout.Write(buf)
+var buf = make([]byte, BufferSize+5)
+
+func writePacket(tag uint8, data []byte) {
+	payloadLen := len(data) + 1
+
+	writeUint32Be(buf[:4], uint32(payloadLen))
+	writeUint8Be(buf[4:5], tag)
+	copy(buf[5:], data)
+
+	_, writeErr := os.Stdout.Write(buf[:payloadLen+4])
 	if writeErr != nil {
 		switch writeErr.(type) {
 		// ignore broken pipe or closed pipe errors
