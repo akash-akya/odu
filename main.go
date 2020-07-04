@@ -47,7 +47,7 @@ func validateArgs(args []string) {
 		dieUsage(fmt.Sprintf("Invalid version specified: %v  Supported version: %v", *protocolVersionFlag, ProtocolVersion))
 	}
 
-	logger.Printf("Flag values:\n  dir: %v\n  log: %v\n  protocol_version: %v\n  Args: %v\n", *cdFlag, *logFlag, *protocolVersionFlag, args)
+	logger.Printf("dir:%v, log:%v, protocol_version:%v, args:%v\n", *cdFlag, *logFlag, *protocolVersionFlag, args)
 }
 
 func notFifo(path string) bool {

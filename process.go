@@ -13,13 +13,15 @@ func startCommandPipeline(proc *exec.Cmd, input <-chan Packet, inputDemand chan<
 	cmdOutput, err := proc.StdoutPipe()
 	fatalIf(err)
 
-	// cmdError, err := proc.StderrPipe()
-	// fatalIf(err)
+	cmdError, err := proc.StderrPipe()
+	fatalIf(err)
 
 	execErr := proc.Start()
 	fatalIf(execErr)
 
 	go writeToCommandStdin(cmdInput, input, inputDemand)
+
+	go printStderr(cmdError)
 
 	output := make(chan Packet)
 	go readCommandStdout(cmdOutput, outputDemand, output)
@@ -87,6 +89,25 @@ func readCommandStdout(cmdOutput io.ReadCloser, outputDemand <-chan Packet, outp
 		bytesRead, readErr := cmdOutput.Read(buf[:])
 		if bytesRead > 0 {
 			output <- Packet{Output, buf[:bytesRead]}
+		} else if readErr == io.EOF || bytesRead == 0 {
+			return
+		} else {
+			fatal(readErr)
+		}
+	}
+}
+
+func printStderr(cmdError io.ReadCloser) {
+	var buf [BufferSize]byte
+
+	defer func() {
+		cmdError.Close()
+	}()
+
+	for {
+		bytesRead, readErr := cmdError.Read(buf[:])
+		if bytesRead > 0 {
+			logger.Printf(string(buf[:bytesRead]))
 		} else if readErr == io.EOF || bytesRead == 0 {
 			return
 		} else {
